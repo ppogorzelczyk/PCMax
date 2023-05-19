@@ -7,13 +7,13 @@ using System.Threading.Tasks;
 public class GeneticTaskScheduler
 {
     private static readonly Random Random = new Random();
-    private const int PopulationSize = 50;
-    private const int TournamentSize = 3; // 6% of population
-    private const double CrossoverRate = 0.75;
-    private const double MutationRate = 0.75;
-    private const int StagnationGenerations = 30;
-    private const double MinimumImprovement = 0.01;
-    private const int MaxGenerations = 1000;
+    private const int PopulationSize = 200;
+    private const int TournamentSize = 20; // 10% of population
+    private const double CrossoverRate = 0.9; // 90%
+    private const double MutationRate = 0.01; // 1%
+    private const int StagnationGenerations = 30; // not working
+    private const double MinimumImprovement = 0.02; // not working
+    private const int MaxGenerations = 20000;
 
     public int GetTotalCompletionTime(int[] completionTimes)
     {
@@ -40,7 +40,7 @@ public class GeneticTaskScheduler
         // Evaluate initial population
         double[] fitnessValues = new double[PopulationSize];
         Parallel.For(0, PopulationSize, i => {
-            fitnessValues[i] = EvaluateFitness(population[i], fileValues.ExecutionTimes);
+            fitnessValues[i] = EvaluateFitness(population[i], fileValues.ExecutionTimes, fileValues.Processors);
         });
 
         int generationsWithoutImprovement = 0;
@@ -57,8 +57,8 @@ public class GeneticTaskScheduler
             {
                 if (Random.NextDouble() < CrossoverRate && i + 1 < PopulationSize)
                 {
-                    offspring[i] = Crossover(parents[i], parents[i + 1]);
-                    offspring[i + 1] = Crossover(parents[i + 1], parents[i]);
+                    offspring[i] = Crossover(parents[i], parents[i + 1], fileValues.Processors);
+                    offspring[i + 1] = Crossover(parents[i + 1], parents[i], fileValues.Processors);
                 }
                 else
                 {
@@ -79,7 +79,7 @@ public class GeneticTaskScheduler
 
             // Evaluate new population
             Parallel.For(0, PopulationSize, i => {
-                fitnessValues[i] = EvaluateFitness(population[i], fileValues.ExecutionTimes);
+                fitnessValues[i] = EvaluateFitness(population[i], fileValues.ExecutionTimes, fileValues.Processors);
             });
 
             // Check for improvement
@@ -102,11 +102,14 @@ public class GeneticTaskScheduler
             }
 
             generation++;
+            if (generation % 500 == 0)
+            {
+                Console.WriteLine($"[{DateTime.Now}] Generation {generation} of {MaxGenerations}... Current best: {bestFitness}");
+            }
         }
 
         // Return the best solution
-        return GetBestSolutionExecutionTimes(bestSolution, fileValues.ExecutionTimes);
-
+        return GetBestSolutionExecutionTimes(bestSolution, fileValues.ExecutionTimes, fileValues.Processors);
     }
 
     private int[][] GenerateInitialPopulation(PCMaxFile fileValues, int populationSize)
@@ -120,19 +123,24 @@ public class GeneticTaskScheduler
             population[i] = new int[tasksCount];
             for (int j = 0; j < tasksCount; j++)
             {
-                // Assign each task to a random processor
-                population[i][j] = Random.Next(processorsCount);
+                if (j < processorsCount)
+                {
+                    // Assign the first tasks to each processor
+                    population[i][j] = j;
+                }
+                else
+                {
+                    // Assign the rest of the tasks randomly
+                    population[i][j] = Random.Next(processorsCount);
+                }
             }
         }
 
         return population;
     }
 
-    private int[] GetBestSolutionExecutionTimes(int[] solution, int[] executionTimes)
+    private int[] GetBestSolutionExecutionTimes(int[] solution, int[] executionTimes, short processorsCount)
     {
-        // Determine the number of processors
-        int processorsCount = solution.Max() + 1;
-
         // Initialize an array to hold the total execution time for each processor
         int[] processorTimes = new int[processorsCount];
 
@@ -145,11 +153,8 @@ public class GeneticTaskScheduler
         return processorTimes;
     }
 
-    private double EvaluateFitness(int[] solution, int[] executionTimes)
+    private double EvaluateFitness(int[] solution, int[] executionTimes, short processorsCount)
     {
-        // Determine the number of processors
-        int processorsCount = solution.Max() + 1;
-
         // Initialize an array to hold the total execution time for each processor
         int[] processorTimes = new int[processorsCount];
 
@@ -201,17 +206,14 @@ public class GeneticTaskScheduler
         return indices.ToArray();
     }
 
-
-
-
-    private int[] Crossover(int[] parent1, int[] parent2)
+    private int[] Crossover(int[] parent1, int[] parent2, short processorsCount)
     {
         // Create a new array for the child
         int[] child = new int[parent1.Length];
 
         // Create a list of tasks for each processor for each parent
-        List<int>[] tasksPerProcessorParent1 = new List<int>[parent1.Max() + 1];
-        List<int>[] tasksPerProcessorParent2 = new List<int>[parent2.Max() + 1];
+        List<int>[] tasksPerProcessorParent1 = new List<int>[processorsCount];
+        List<int>[] tasksPerProcessorParent2 = new List<int>[processorsCount];
 
         for (int i = 0; i < parent1.Length; i++)
         {
